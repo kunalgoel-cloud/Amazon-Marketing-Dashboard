@@ -726,7 +726,8 @@ def main():
         st.subheader("⏰ Time Filter")
         date_range = st.selectbox(
             "Focus on campaigns from:",
-            ["All Time", "Last 7 Days", "Last 14 Days", "Last 30 Days", "Custom Range"]
+            ["All Time", "Last 7 Days", "Last 14 Days", "Last 30 Days", "Custom Range"],
+            key='date_range_select'
         )
         
         start_date = None
@@ -734,9 +735,30 @@ def main():
         if date_range == "Custom Range":
             col1, col2 = st.columns(2)
             with col1:
-                start_date = st.date_input("Start Date")
+                start_date = st.date_input("Start Date", key='start_date_input')
             with col2:
-                end_date = st.date_input("End Date")
+                end_date = st.date_input("End Date", key='end_date_input')
+    
+    # Store in session state to ensure accessibility
+    if 'date_range' not in st.session_state:
+        st.session_state.date_range = "All Time"
+    if 'start_date' not in st.session_state:
+        st.session_state.start_date = None
+    if 'end_date' not in st.session_state:
+        st.session_state.end_date = None
+    
+    # Update session state with current values (inside sidebar context)
+    try:
+        st.session_state.date_range = date_range
+        st.session_state.start_date = start_date
+        st.session_state.end_date = end_date
+    except:
+        pass
+    
+    # Use session state values for recommendations
+    active_date_range = st.session_state.date_range
+    active_start_date = st.session_state.start_date
+    active_end_date = st.session_state.end_date
     
     # Main tabs - SIMPLIFIED AND ACTIONABLE
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -752,8 +774,8 @@ def main():
         st.header("Performance Summary")
         
         # Show active filter
-        if date_range != "All Time":
-            st.info(f"📅 Showing data for: **{date_range}**")
+        if active_date_range != "All Time":
+            st.info(f"📅 Showing data for: **{active_date_range}**")
         
         stats = analyzer.get_summary_stats()
         
@@ -776,7 +798,7 @@ def main():
             st.markdown("---")
             
             # Quick action summary
-            recs = analyzer.generate_campaign_recommendations(date_range, start_date, end_date)
+            recs = analyzer.generate_campaign_recommendations(active_date_range, active_start_date, active_end_date)
             if not recs.empty and 'Action' in recs.columns:
                 st.subheader("📋 Action Summary")
                 
@@ -815,10 +837,10 @@ def main():
         st.header("🎯 Campaign Recommendations")
         
         # Show active filter
-        if date_range != "All Time":
-            st.info(f"📅 Showing data for: **{date_range}**")
+        if active_date_range != "All Time":
+            st.info(f"📅 Showing data for: **{active_date_range}**")
         
-        recs = analyzer.generate_campaign_recommendations(date_range, start_date, end_date)
+        recs = analyzer.generate_campaign_recommendations(active_date_range, active_start_date, active_end_date)
         
         if not recs.empty:
             # Summary at top
@@ -898,10 +920,10 @@ def main():
         st.header("🔑 Keyword Recommendations")
         
         # Show active filter
-        if date_range != "All Time":
-            st.info(f"📅 Showing data for: **{date_range}**")
+        if active_date_range != "All Time":
+            st.info(f"📅 Showing data for: **{active_date_range}**")
         
-        keyword_recs = analyzer.generate_keyword_recommendations(date_range, start_date, end_date)
+        keyword_recs = analyzer.generate_keyword_recommendations(active_date_range, active_start_date, active_end_date)
         
         if not keyword_recs.empty:
             # Summary
@@ -979,10 +1001,10 @@ def main():
         st.header("📦 Product Recommendations")
         
         # Show active filter
-        if date_range != "All Time":
-            st.info(f"📅 Showing data for: **{date_range}**")
+        if active_date_range != "All Time":
+            st.info(f"📅 Showing data for: **{active_date_range}**")
         
-        product_recs = analyzer.generate_product_recommendations(date_range, start_date, end_date)
+        product_recs = analyzer.generate_product_recommendations(active_date_range, active_start_date, active_end_date)
         
         if not product_recs.empty:
             # Summary
