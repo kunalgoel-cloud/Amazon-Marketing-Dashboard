@@ -526,54 +526,75 @@ class AmazonROIAnalyzer:
     
     def generate_product_recommendations(self):
         """Generate product recommendations in tabular format"""
-        results = []
-        
-        # From repeat purchase data
-        if self.weekly_repeat is not None and len(self.weekly_repeat) > 0:
-            df = self.weekly_repeat.copy()
+        try:
+            results = []
             
-            if 'Product Title' in df.columns:
-                for product in df['Product Title'].unique():
-                    product_data = df[df['Product Title'] == product]
-                    
-                    sales = product_data['Repeat Ordered Product Sales: Sales'].sum() if 'Repeat Ordered Product Sales: Sales' in product_data.columns else 0
-                    repeat_rate = product_data['Repeat Customer Share: % Share of Total Customers'].mean() if 'Repeat Customer Share: % Share of Total Customers' in product_data.columns else 0
-                    asin = product_data['ASIN'].iloc[0] if 'ASIN' in product_data.columns else self.product_mapper.get_asin(product)
-                    
-                    # Determine action
-                    if repeat_rate > 5 and sales > 10000:
-                        action = 'SCALE UP'
-                        recommendation = 'Increase ad spend 30-50%'
-                        priority = 1
-                    elif repeat_rate > 2 and sales > 5000:
-                        action = 'MAINTAIN'
-                        recommendation = 'Keep current spend level'
-                        priority = 2
-                    elif repeat_rate < 1 and sales < 3000:
-                        action = 'DISCONTINUE'
-                        recommendation = 'Stop or major restructure'
-                        priority = 4
-                    else:
-                        action = 'REDUCE'
-                        recommendation = 'Cut spend by 20-30%'
-                        priority = 3
-                    
-                    results.append({
-                        'Product': product,
-                        'ASIN': asin,
-                        'Action': action,
-                        'Repeat Rate %': round(repeat_rate, 2),
-                        'Sales': round(sales, 0),
-                        'Recommendation': recommendation,
-                        'Priority': priority
-                    })
-        
-        if results:
-            result_df = pd.DataFrame(results)
-            result_df = result_df.sort_values(['Priority', 'Sales'], ascending=[True, False])
-            return result_df
-        
-        return pd.DataFrame()
+            # From repeat purchase data
+            if self.weekly_repeat is not None and len(self.weekly_repeat) > 0:
+                df = self.weekly_repeat.copy()
+                
+                if 'Product Title' in df.columns:
+                    for product in df['Product Title'].unique():
+                        # Skip if product is NaN
+                        if pd.isna(product):
+                            continue
+                            
+                        product_data = df[df['Product Title'] == product]
+                        
+                        # Skip if no data for this product
+                        if len(product_data) == 0:
+                            continue
+                        
+                        sales = product_data['Repeat Ordered Product Sales: Sales'].sum() if 'Repeat Ordered Product Sales: Sales' in product_data.columns else 0
+                        repeat_rate = product_data['Repeat Customer Share: % Share of Total Customers'].mean() if 'Repeat Customer Share: % Share of Total Customers' in product_data.columns else 0
+                        
+                        # Get ASIN safely
+                        if 'ASIN' in product_data.columns and len(product_data['ASIN']) > 0:
+                            asin = product_data['ASIN'].iloc[0]
+                        else:
+                            asin = self.product_mapper.get_asin(product)
+                        
+                        # Determine action
+                        if repeat_rate > 5 and sales > 10000:
+                            action = 'SCALE UP'
+                            recommendation = 'Increase ad spend 30-50%'
+                            priority = 1
+                        elif repeat_rate > 2 and sales > 5000:
+                            action = 'MAINTAIN'
+                            recommendation = 'Keep current spend level'
+                            priority = 2
+                        elif repeat_rate < 1 and sales < 3000:
+                            action = 'DISCONTINUE'
+                            recommendation = 'Stop or major restructure'
+                            priority = 4
+                        else:
+                            action = 'REDUCE'
+                            recommendation = 'Cut spend by 20-30%'
+                            priority = 3
+                        
+                        results.append({
+                            'Product': product,
+                            'ASIN': asin,
+                            'Action': action,
+                            'Repeat Rate %': round(repeat_rate, 2),
+                            'Sales': round(sales, 0),
+                            'Recommendation': recommendation,
+                            'Priority': priority
+                        })
+            
+            if results:
+                result_df = pd.DataFrame(results)
+                result_df = result_df.sort_values(['Priority', 'Sales'], ascending=[True, False])
+                return result_df
+            
+            return pd.DataFrame()
+            
+        except Exception as e:
+            # Log error and return empty dataframe
+            import traceback
+            print(f"Error in generate_product_recommendations: {str(e)}")
+            print(traceback.format_exc())
+            return pd.DataFrame()
 
 
 def main():
