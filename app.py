@@ -379,13 +379,79 @@ class AmazonROIAnalyzer:
         
         return stats
     
-    def generate_campaign_recommendations(self):
+    def apply_time_filter(self, df, date_range, start_date=None, end_date=None):
+        """Apply time filter to dataframe based on Campaign start date or Week"""
+        if df is None or len(df) == 0:
+            return df
+        
+        if date_range == "All Time":
+            return df
+        
+        df_filtered = df.copy()
+        current_date = datetime.now()
+        
+        # Try to find a date column
+        date_col = None
+        if 'Campaign start date' in df_filtered.columns:
+            date_col = 'Campaign start date'
+            df_filtered[date_col] = pd.to_datetime(df_filtered[date_col], errors='coerce')
+        elif 'Week' in df_filtered.columns:
+            # Try to parse week string like "02Mar-08Mar"
+            def parse_week_end(week_str):
+                try:
+                    if pd.isna(week_str):
+                        return pd.NaT
+                    # Get the end date from "02Mar-08Mar" format
+                    parts = str(week_str).split('-')
+                    if len(parts) == 2:
+                        end_part = parts[1]
+                        # Parse like "08Mar"
+                        return pd.to_datetime(end_part, format='%d%b', errors='coerce')
+                    return pd.NaT
+                except:
+                    return pd.NaT
+            
+            df_filtered['_parsed_date'] = df_filtered['Week'].apply(parse_week_end)
+            date_col = '_parsed_date'
+        
+        if date_col is None:
+            # No date column found, return all data
+            return df
+        
+        # Apply filter based on date range
+        if date_range == "Last 7 Days":
+            cutoff = current_date - timedelta(days=7)
+            df_filtered = df_filtered[df_filtered[date_col] >= cutoff]
+        elif date_range == "Last 14 Days":
+            cutoff = current_date - timedelta(days=14)
+            df_filtered = df_filtered[df_filtered[date_col] >= cutoff]
+        elif date_range == "Last 30 Days":
+            cutoff = current_date - timedelta(days=30)
+            df_filtered = df_filtered[df_filtered[date_col] >= cutoff]
+        elif date_range == "Custom Range" and start_date and end_date:
+            start = pd.to_datetime(start_date)
+            end = pd.to_datetime(end_date)
+            df_filtered = df_filtered[(df_filtered[date_col] >= start) & (df_filtered[date_col] <= end)]
+        
+        # Remove temporary column if we created it
+        if '_parsed_date' in df_filtered.columns:
+            df_filtered = df_filtered.drop('_parsed_date', axis=1)
+        
+        return df_filtered
+    
+    def generate_campaign_recommendations(self, date_range="All Time", start_date=None, end_date=None):
         """Generate campaign recommendations in tabular format"""
         try:
             if self.daily_campaigns is None or len(self.daily_campaigns) == 0:
                 return pd.DataFrame()
             
-            df = self.daily_campaigns.copy()
+            # Apply time filter
+            df = self.apply_time_filter(self.daily_campaigns, date_range, start_date, end_date)
+            
+            if len(df) == 0:
+                return pd.DataFrame()
+            
+            df = df.copy()
             
             # Get column names
             spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
@@ -455,13 +521,19 @@ class AmazonROIAnalyzer:
             print(traceback.format_exc())
             return pd.DataFrame()
     
-    def generate_keyword_recommendations(self):
+    def generate_keyword_recommendations(self, date_range="All Time", start_date=None, end_date=None):
         """Generate keyword recommendations in tabular format"""
         try:
             if self.daily_targets is None or len(self.daily_targets) == 0:
                 return pd.DataFrame()
             
-            df = self.daily_targets.copy()
+            # Apply time filter
+            df = self.apply_time_filter(self.daily_targets, date_range, start_date, end_date)
+            
+            if len(df) == 0:
+                return pd.DataFrame()
+            
+            df = df.copy()
             
             # Filter keywords with minimum spend (only if column exists)
             if 'Spend' in df.columns:
@@ -524,14 +596,20 @@ class AmazonROIAnalyzer:
             print(traceback.format_exc())
             return pd.DataFrame()
     
-    def generate_product_recommendations(self):
+    def generate_product_recommendations(self, date_range="All Time", start_date=None, end_date=None):
         """Generate product recommendations in tabular format"""
         try:
             results = []
             
             # From repeat purchase data
             if self.weekly_repeat is not None and len(self.weekly_repeat) > 0:
-                df = self.weekly_repeat.copy()
+                # Apply time filter
+                df = self.apply_time_filter(self.weekly_repeat, date_range, start_date, end_date)
+                
+                if len(df) == 0:
+                    return pd.DataFrame()
+                
+                df = df.copy()
                 
                 if 'Product Title' in df.columns:
                     for product in df['Product Title'].unique():
@@ -651,6 +729,8 @@ def main():
             ["All Time", "Last 7 Days", "Last 14 Days", "Last 30 Days", "Custom Range"]
         )
         
+        start_date = None
+        end_date = None
         if date_range == "Custom Range":
             col1, col2 = st.columns(2)
             with col1:
@@ -670,6 +750,10 @@ def main():
     # Tab 1: Dashboard
     with tab1:
         st.header("Performance Summary")
+        
+        # Show active filter
+        if date_range != "All Time":
+            st.info(f"📅 Showing data for: **{date_range}**")
         
         stats = analyzer.get_summary_stats()
         
@@ -692,7 +776,7 @@ def main():
             st.markdown("---")
             
             # Quick action summary
-            recs = analyzer.generate_campaign_recommendations()
+            recs = analyzer.generate_campaign_recommendations(date_range, start_date, end_date)
             if not recs.empty and 'Action' in recs.columns:
                 st.subheader("📋 Action Summary")
                 
@@ -730,7 +814,11 @@ def main():
     with tab2:
         st.header("🎯 Campaign Recommendations")
         
-        recs = analyzer.generate_campaign_recommendations()
+        # Show active filter
+        if date_range != "All Time":
+            st.info(f"📅 Showing data for: **{date_range}**")
+        
+        recs = analyzer.generate_campaign_recommendations(date_range, start_date, end_date)
         
         if not recs.empty:
             # Summary at top
@@ -809,7 +897,11 @@ def main():
     with tab3:
         st.header("🔑 Keyword Recommendations")
         
-        keyword_recs = analyzer.generate_keyword_recommendations()
+        # Show active filter
+        if date_range != "All Time":
+            st.info(f"📅 Showing data for: **{date_range}**")
+        
+        keyword_recs = analyzer.generate_keyword_recommendations(date_range, start_date, end_date)
         
         if not keyword_recs.empty:
             # Summary
@@ -886,7 +978,11 @@ def main():
     with tab4:
         st.header("📦 Product Recommendations")
         
-        product_recs = analyzer.generate_product_recommendations()
+        # Show active filter
+        if date_range != "All Time":
+            st.info(f"📅 Showing data for: **{date_range}**")
+        
+        product_recs = analyzer.generate_product_recommendations(date_range, start_date, end_date)
         
         if not product_recs.empty:
             # Summary
