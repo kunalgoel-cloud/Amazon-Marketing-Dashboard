@@ -381,116 +381,148 @@ class AmazonROIAnalyzer:
     
     def generate_campaign_recommendations(self):
         """Generate campaign recommendations in tabular format"""
-        if self.daily_campaigns is None or len(self.daily_campaigns) == 0:
-            return pd.DataFrame()
-        
-        df = self.daily_campaigns.copy()
-        
-        # Get column names
-        spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
-        sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
-        
-        # Filter campaigns with minimum spend (only if column exists)
-        if spend_col in df.columns:
-            df = df[df[spend_col] > 100]
-        
-        # Check if we have any data left
-        if len(df) == 0:
-            return pd.DataFrame()
-        
-        # Calculate metrics
-        if 'ROAS' in df.columns and 'Campaign name' in df.columns:
-            # Determine action
-            def get_action(row):
-                roas = row['ROAS']
-                purchases = row.get('Purchases', 0)
+        try:
+            if self.daily_campaigns is None or len(self.daily_campaigns) == 0:
+                return pd.DataFrame()
+            
+            df = self.daily_campaigns.copy()
+            
+            # Get column names
+            spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
+            sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
+            
+            # Filter campaigns with minimum spend (only if column exists)
+            if spend_col in df.columns:
+                df = df[df[spend_col] > 100]
+            
+            # Check if we have any data left
+            if len(df) == 0:
+                return pd.DataFrame()
+            
+            # Calculate metrics
+            if 'ROAS' in df.columns and 'Campaign name' in df.columns:
+                # Determine action
+                def get_action(row):
+                    roas = row['ROAS']
+                    purchases = row.get('Purchases', 0)
+                    
+                    if roas >= 3.0 and purchases >= 5:
+                        return 'EXPAND', 'Increase budget by 30-50%', 1
+                    elif roas >= 2.0:
+                        return 'OPTIMIZE', 'Review keywords and adjust bids', 2
+                    elif roas >= 1.0:
+                        return 'PAUSE', 'Pause and analyze', 3
+                    else:
+                        return 'CLOSE', 'Close immediately', 4
                 
-                if roas >= 3.0 and purchases >= 5:
-                    return 'EXPAND', 'Increase budget by 30-50%', 1
+                df[['Action', 'Recommendation', 'Priority']] = df.apply(
+                    lambda row: pd.Series(get_action(row)), axis=1
+                )
+                
+                # Select relevant columns including Priority for sorting
+                result_cols = ['Campaign name', 'Action', 'ROAS', sales_col, spend_col, 
+                              'Purchases', 'Clicks', 'Recommendation', 'Priority']
+                
+                # Filter to only existing columns
+                result_cols = [col for col in result_cols if col in df.columns]
+                
+                result = df[result_cols].copy()
+                
+                # Sort by priority and ROAS BEFORE renaming
+                sort_cols = []
+                if 'Priority' in result.columns:
+                    sort_cols.append('Priority')
+                if 'ROAS' in result.columns:
+                    sort_cols.append('ROAS')
+                
+                if sort_cols:
+                    ascending = [True] * len(sort_cols)
+                    ascending[-1] = False  # Last column (ROAS) descending
+                    result = result.sort_values(sort_cols, ascending=ascending)
+                
+                # Rename for display
+                result.columns = [col.replace(' (converted)', '').replace('_', ' ').title() 
+                                for col in result.columns]
+                
+                return result
+            
+            return pd.DataFrame()
+            
+        except Exception as e:
+            # Log error and return empty dataframe
+            import traceback
+            print(f"Error in generate_campaign_recommendations: {str(e)}")
+            print(traceback.format_exc())
+            return pd.DataFrame()
+    
+    def generate_keyword_recommendations(self):
+        """Generate keyword recommendations in tabular format"""
+        try:
+            if self.daily_targets is None or len(self.daily_targets) == 0:
+                return pd.DataFrame()
+            
+            df = self.daily_targets.copy()
+            
+            # Filter keywords with minimum spend (only if column exists)
+            if 'Spend' in df.columns:
+                df = df[df['Spend'] > 50]
+            
+            # Check if we have any data left
+            if len(df) == 0:
+                return pd.DataFrame()
+            
+            # Ensure required columns exist
+            if 'Target' not in df.columns or 'ROAS' not in df.columns:
+                return pd.DataFrame()
+            
+            # Determine action
+            def get_keyword_action(row):
+                roas = row.get('ROAS', 0)
+                spend = row.get('Spend', 0)
+                
+                if roas >= 3.0:
+                    return 'INCREASE BID', 'High performer - bid higher', 1
                 elif roas >= 2.0:
-                    return 'OPTIMIZE', 'Review keywords and adjust bids', 2
+                    return 'MAINTAIN', 'Stable - keep current bid', 2
                 elif roas >= 1.0:
-                    return 'PAUSE', 'Pause and analyze', 3
+                    return 'REDUCE BID', 'Underperforming - lower bid', 3
                 else:
-                    return 'CLOSE', 'Close immediately', 4
+                    return 'PAUSE', 'Money loser - pause keyword', 4
             
             df[['Action', 'Recommendation', 'Priority']] = df.apply(
-                lambda row: pd.Series(get_action(row)), axis=1
+                lambda row: pd.Series(get_keyword_action(row)), axis=1
             )
             
             # Select relevant columns including Priority for sorting
-            result_cols = ['Campaign name', 'Action', 'ROAS', sales_col, spend_col, 
-                          'Purchases', 'Clicks', 'Recommendation', 'Priority']
-            
-            # Filter to only existing columns
+            result_cols = ['Target', 'Campaign', 'Action', 'ROAS', 'Sales', 'Spend', 
+                          'Orders', 'Clicks', 'CTR', 'Recommendation', 'Priority']
             result_cols = [col for col in result_cols if col in df.columns]
             
             result = df[result_cols].copy()
             
             # Sort by priority and ROAS BEFORE renaming
-            if 'Priority' in result.columns and 'ROAS' in result.columns:
-                result = result.sort_values(['Priority', 'ROAS'], ascending=[True, False])
+            sort_cols = []
+            if 'Priority' in result.columns:
+                sort_cols.append('Priority')
+            if 'ROAS' in result.columns:
+                sort_cols.append('ROAS')
+            
+            if sort_cols:
+                ascending = [True] * len(sort_cols)
+                ascending[-1] = False  # Last column (ROAS) descending
+                result = result.sort_values(sort_cols, ascending=ascending)
             
             # Rename for display
-            result.columns = [col.replace(' (converted)', '').replace('_', ' ').title() 
-                            for col in result.columns]
+            result.columns = [col.replace('_', ' ').title() for col in result.columns]
             
             return result
-        
-        return pd.DataFrame()
-    
-    def generate_keyword_recommendations(self):
-        """Generate keyword recommendations in tabular format"""
-        if self.daily_targets is None or len(self.daily_targets) == 0:
-            return pd.DataFrame()
-        
-        df = self.daily_targets.copy()
-        
-        # Filter keywords with minimum spend (only if column exists)
-        if 'Spend' in df.columns:
-            df = df[df['Spend'] > 50]
-        
-        # Check if we have any data left
-        if len(df) == 0:
-            return pd.DataFrame()
-        
-        # Ensure required columns exist
-        if 'Target' not in df.columns or 'ROAS' not in df.columns:
-            return pd.DataFrame()
-        
-        # Determine action
-        def get_keyword_action(row):
-            roas = row.get('ROAS', 0)
-            spend = row.get('Spend', 0)
             
-            if roas >= 3.0:
-                return 'INCREASE BID', 'High performer - bid higher', 1
-            elif roas >= 2.0:
-                return 'MAINTAIN', 'Stable - keep current bid', 2
-            elif roas >= 1.0:
-                return 'REDUCE BID', 'Underperforming - lower bid', 3
-            else:
-                return 'PAUSE', 'Money loser - pause keyword', 4
-        
-        df[['Action', 'Recommendation', 'Priority']] = df.apply(
-            lambda row: pd.Series(get_keyword_action(row)), axis=1
-        )
-        
-        # Select relevant columns including Priority for sorting
-        result_cols = ['Target', 'Campaign', 'Action', 'ROAS', 'Sales', 'Spend', 
-                      'Orders', 'Clicks', 'CTR', 'Recommendation', 'Priority']
-        result_cols = [col for col in result_cols if col in df.columns]
-        
-        result = df[result_cols].copy()
-        
-        # Sort by priority and ROAS BEFORE renaming
-        if 'Priority' in result.columns and 'ROAS' in result.columns:
-            result = result.sort_values(['Priority', 'ROAS'], ascending=[True, False])
-        
-        # Rename for display
-        result.columns = [col.replace('_', ' ').title() for col in result.columns]
-        
-        return result
+        except Exception as e:
+            # Log error and return empty dataframe
+            import traceback
+            print(f"Error in generate_keyword_recommendations: {str(e)}")
+            print(traceback.format_exc())
+            return pd.DataFrame()
     
     def generate_product_recommendations(self):
         """Generate product recommendations in tabular format"""
