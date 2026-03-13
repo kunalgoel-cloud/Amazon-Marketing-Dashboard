@@ -1,6 +1,6 @@
 """
-Amazon Marketing ROI Analyzer - Enhanced Version
-Includes: Historical tracking, trend analysis, keyword performance, product recommendations
+Amazon Marketing ROI Analyzer - Improved Version
+Focus: Actionable insights, better UX, tabular data, product mapping
 """
 
 import streamlit as st
@@ -10,9 +10,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
 from pathlib import Path
-import io
 import json
-import os
 
 # Page configuration
 st.set_page_config(
@@ -32,55 +30,90 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #FF9900;
+    .stDataFrame {
+        font-size: 0.9rem;
     }
-    .recommendation-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .expand {
+    .action-expand {
         background-color: #d4edda;
-        border-left: 4px solid #28a745;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
+        font-weight: bold;
+        color: #155724;
     }
-    .optimize {
+    .action-optimize {
         background-color: #cfe2ff;
-        border-left: 4px solid #0d6efd;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
+        font-weight: bold;
+        color: #084298;
     }
-    .pause {
+    .action-pause {
         background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
+        font-weight: bold;
+        color: #856404;
     }
-    .close {
+    .action-close {
         background-color: #f8d7da;
-        border-left: 4px solid #dc3545;
-    }
-    .trending-up {
-        color: #28a745;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
         font-weight: bold;
-    }
-    .trending-down {
-        color: #dc3545;
-        font-weight: bold;
+        color: #721c24;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Historical data storage directory
+# Historical data directory
 HISTORY_DIR = Path("marketing_history")
 HISTORY_DIR.mkdir(exist_ok=True)
 
+# Product mapping file
+PRODUCT_MAPPING_FILE = HISTORY_DIR / "product_asin_mapping.json"
+
+
+class ProductMappingManager:
+    """Manage product to ASIN mapping"""
+    
+    def __init__(self):
+        self.mapping = self.load_mapping()
+    
+    def load_mapping(self):
+        """Load product-ASIN mapping from file"""
+        if PRODUCT_MAPPING_FILE.exists():
+            with open(PRODUCT_MAPPING_FILE, 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def save_mapping(self, mapping):
+        """Save product-ASIN mapping to file"""
+        with open(PRODUCT_MAPPING_FILE, 'w') as f:
+            json.dump(mapping, f, indent=2)
+        self.mapping = mapping
+    
+    def add_mapping(self, product_name, asin):
+        """Add a product-ASIN mapping"""
+        self.mapping[product_name] = asin
+        self.save_mapping(self.mapping)
+    
+    def get_asin(self, product_name):
+        """Get ASIN for a product"""
+        return self.mapping.get(product_name, "Unknown")
+    
+    def get_product(self, asin):
+        """Get product name for an ASIN"""
+        for product, mapped_asin in self.mapping.items():
+            if mapped_asin == asin:
+                return product
+        return "Unknown"
+
+
 class HistoricalDataManager:
-    """Manage historical data storage and retrieval"""
+    """Manage historical data storage"""
     
     def __init__(self):
         self.history_file = HISTORY_DIR / "campaign_history.csv"
         self.keyword_history_file = HISTORY_DIR / "keyword_history.csv"
-        self.product_history_file = HISTORY_DIR / "product_history.csv"
     
     def save_campaign_snapshot(self, df, snapshot_date=None):
         """Save campaign performance snapshot"""
@@ -93,10 +126,8 @@ class HistoricalDataManager:
         df_snapshot = df.copy()
         df_snapshot['snapshot_date'] = snapshot_date
         
-        # Append to history
         if self.history_file.exists():
             history = pd.read_csv(self.history_file)
-            # Remove duplicates for same date/campaign
             history = history[history['snapshot_date'] != snapshot_date]
             df_snapshot = pd.concat([history, df_snapshot], ignore_index=True)
         
@@ -120,60 +151,21 @@ class HistoricalDataManager:
         
         df_snapshot.to_csv(self.keyword_history_file, index=False)
     
-    def save_product_snapshot(self, df, snapshot_date=None):
-        """Save product performance snapshot"""
-        if df is None or len(df) == 0:
-            return
-        
-        if snapshot_date is None:
-            snapshot_date = datetime.now().strftime('%Y-%m-%d')
-        
-        df_snapshot = df.copy()
-        df_snapshot['snapshot_date'] = snapshot_date
-        
-        if self.product_history_file.exists():
-            history = pd.read_csv(self.product_history_file)
-            history = history[history['snapshot_date'] != snapshot_date]
-            df_snapshot = pd.concat([history, df_snapshot], ignore_index=True)
-        
-        df_snapshot.to_csv(self.product_history_file, index=False)
+    def get_campaign_history(self):
+        """Get all campaign history"""
+        if self.history_file.exists():
+            return pd.read_csv(self.history_file)
+        return None
     
-    def get_campaign_history(self, days=30):
-        """Get campaign history for last N days"""
-        if not self.history_file.exists():
-            return None
-        
-        history = pd.read_csv(self.history_file)
-        history['snapshot_date'] = pd.to_datetime(history['snapshot_date'])
-        
-        cutoff_date = datetime.now() - timedelta(days=days)
-        return history[history['snapshot_date'] >= cutoff_date]
-    
-    def get_keyword_history(self, days=30):
-        """Get keyword history for last N days"""
-        if not self.keyword_history_file.exists():
-            return None
-        
-        history = pd.read_csv(self.keyword_history_file)
-        history['snapshot_date'] = pd.to_datetime(history['snapshot_date'])
-        
-        cutoff_date = datetime.now() - timedelta(days=days)
-        return history[history['snapshot_date'] >= cutoff_date]
-    
-    def get_product_history(self, days=30):
-        """Get product history for last N days"""
-        if not self.product_history_file.exists():
-            return None
-        
-        history = pd.read_csv(self.product_history_file)
-        history['snapshot_date'] = pd.to_datetime(history['snapshot_date'])
-        
-        cutoff_date = datetime.now() - timedelta(days=days)
-        return history[history['snapshot_date'] >= cutoff_date]
+    def get_keyword_history(self):
+        """Get all keyword history"""
+        if self.keyword_history_file.exists():
+            return pd.read_csv(self.keyword_history_file)
+        return None
 
 
 class AmazonROIAnalyzer:
-    """Main analyzer class for processing Amazon marketing data"""
+    """Main analyzer class"""
     
     def __init__(self):
         self.weekly_sales = None
@@ -183,11 +175,11 @@ class AmazonROIAnalyzer:
         self.daily_campaigns = None
         self.daily_targets = None
         self.daily_inventory = None
-        self.combined_data = None
         self.history_manager = HistoricalDataManager()
+        self.product_mapper = ProductMappingManager()
         
     def parse_currency(self, value):
-        """Parse currency string to float"""
+        """Parse currency to float"""
         if pd.isna(value):
             return 0.0
         if isinstance(value, (int, float)):
@@ -199,7 +191,7 @@ class AmazonROIAnalyzer:
             return 0.0
     
     def parse_percentage(self, value):
-        """Parse percentage string to float"""
+        """Parse percentage to float"""
         if pd.isna(value):
             return 0.0
         if isinstance(value, (int, float)):
@@ -215,7 +207,6 @@ class AmazonROIAnalyzer:
         try:
             xl = pd.ExcelFile(file)
             sheets_data = []
-            
             for sheet in xl.sheet_names:
                 if sheet not in ['WeeklyOnePager', 'Summary']:
                     df = pd.read_excel(file, sheet_name=sheet)
@@ -235,7 +226,6 @@ class AmazonROIAnalyzer:
         try:
             xl = pd.ExcelFile(file)
             sheets_data = []
-            
             for sheet in xl.sheet_names:
                 df = pd.read_excel(file, sheet_name=sheet)
                 df['Week'] = sheet
@@ -260,7 +250,6 @@ class AmazonROIAnalyzer:
         try:
             xl = pd.ExcelFile(file)
             sheets_data = []
-            
             for sheet in xl.sheet_names:
                 df = pd.read_excel(file, sheet_name=sheet)
                 df['Week'] = sheet
@@ -269,11 +258,7 @@ class AmazonROIAnalyzer:
             if sheets_data:
                 self.weekly_cpr = pd.concat(sheets_data, ignore_index=True)
                 st.success(f"✅ Loaded Weekly CPR: {len(self.weekly_cpr)} entries")
-                
-                # Save keyword history
-                if 'Keyword' in self.weekly_cpr.columns:
-                    self.history_manager.save_keyword_snapshot(self.weekly_cpr)
-                
+                self.history_manager.save_keyword_snapshot(self.weekly_cpr)
                 return True
         except Exception as e:
             st.error(f"Error loading weekly CPR: {str(e)}")
@@ -284,7 +269,6 @@ class AmazonROIAnalyzer:
         try:
             xl = pd.ExcelFile(file)
             sheets_data = []
-            
             for sheet in xl.sheet_names:
                 df = pd.read_excel(file, sheet_name=sheet)
                 df['Week'] = sheet
@@ -293,10 +277,6 @@ class AmazonROIAnalyzer:
             if sheets_data:
                 self.weekly_repeat = pd.concat(sheets_data, ignore_index=True)
                 st.success(f"✅ Loaded Weekly Repeat Purchase: {len(self.weekly_repeat)} products")
-                
-                # Save product history
-                self.history_manager.save_product_snapshot(self.weekly_repeat)
-                
                 return True
         except Exception as e:
             st.error(f"Error loading weekly repeat purchase: {str(e)}")
@@ -310,8 +290,8 @@ class AmazonROIAnalyzer:
             if 'Campaign start date' in df.columns:
                 df['Campaign start date'] = pd.to_datetime(df['Campaign start date'], errors='coerce')
             
-            numeric_cols = ['Clicks', 'CTR', 'Total cost (converted)', 'Total cost', 'CPC (converted)', 
-                           'Purchases', 'Sales (converted)', 'Sales', 'ROAS']
+            numeric_cols = ['Clicks', 'CTR', 'Total cost (converted)', 'Total cost', 
+                           'CPC (converted)', 'Purchases', 'Sales (converted)', 'Sales', 'ROAS']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = df[col].apply(self.parse_currency)
@@ -321,8 +301,6 @@ class AmazonROIAnalyzer:
                 df = df.drop_duplicates(subset=['Campaign name'], keep='last')
             
             self.daily_campaigns = df
-            
-            # Save to history
             self.history_manager.save_campaign_snapshot(df)
             
             st.success(f"✅ Loaded Daily Campaigns: {len(df)} campaigns")
@@ -347,10 +325,7 @@ class AmazonROIAnalyzer:
                 df = df.drop_duplicates(subset=['Target', 'Campaign'], keep='last')
             
             self.daily_targets = df
-            
-            # Save keyword/target history
-            if 'Target' in df.columns:
-                self.history_manager.save_keyword_snapshot(df)
+            self.history_manager.save_keyword_snapshot(df)
             
             st.success(f"✅ Loaded Daily Targets: {len(df)} targets")
             return True
@@ -359,12 +334,12 @@ class AmazonROIAnalyzer:
             return False
     
     def load_daily_inventory(self, file):
-        """Load daily inventory/search term report"""
+        """Load daily inventory report"""
         try:
             df = pd.read_csv(file)
             
-            numeric_cols = ['Impressions', 'Clicks', 'CTR', 'Total cost', 'Purchases',
-                           'Sales', 'ROAS', 'Purchase rate']
+            numeric_cols = ['Impressions', 'Clicks', 'CTR', 'Total cost', 
+                           'Purchases', 'Sales', 'ROAS', 'Purchase rate']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = df[col].apply(self.parse_currency)
@@ -381,300 +356,6 @@ class AmazonROIAnalyzer:
             st.error(f"Error loading daily inventory: {str(e)}")
             return False
     
-    def calculate_roi_metrics(self, df):
-        """Calculate ROI and performance metrics"""
-        if df is None or len(df) == 0:
-            return df
-        
-        df = df.copy()
-        
-        # Calculate ROI
-        sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
-        cost_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
-        
-        if sales_col in df.columns and cost_col in df.columns:
-            df['ROI'] = ((df[sales_col] - df[cost_col]) / df[cost_col].replace(0, np.nan)) * 100
-        
-        if 'ROAS' in df.columns:
-            df['ROAS_score'] = df['ROAS']
-        else:
-            df['ROAS_score'] = 0
-        
-        if 'CTR' in df.columns:
-            df['CTR_score'] = df['CTR'] * 100
-        else:
-            df['CTR_score'] = 0
-        
-        df['Efficiency_Score'] = (df['ROAS_score'] * 0.6 + df['CTR_score'] * 0.4)
-        
-        return df
-    
-    def analyze_keyword_performance(self):
-        """Analyze keyword-level performance"""
-        results = {
-            'top_performers': [],
-            'poor_performers': [],
-            'trending_up': [],
-            'trending_down': []
-        }
-        
-        if self.daily_targets is None:
-            return results
-        
-        df = self.daily_targets.copy()
-        
-        # Filter out keywords with insufficient data
-        df = df[df['Spend'] > 50]  # At least ₹50 spend
-        
-        # Top performers
-        if all(col in df.columns for col in ['Target', 'ROAS', 'Sales', 'Spend']):
-            top = df.nlargest(20, 'ROAS')
-            for _, row in top.iterrows():
-                if row['ROAS'] >= 2.0:  # Profitable keywords
-                    results['top_performers'].append({
-                        'keyword': row['Target'],
-                        'campaign': row.get('Campaign', 'Unknown'),
-                        'roas': row['ROAS'],
-                        'sales': row['Sales'],
-                        'spend': row['Spend'],
-                        'action': 'Increase bid' if row['ROAS'] >= 3.0 else 'Maintain'
-                    })
-            
-            # Poor performers
-            poor = df.nsmallest(20, 'ROAS')
-            for _, row in poor.iterrows():
-                if row['ROAS'] < 1.5 and row['Spend'] > 100:
-                    results['poor_performers'].append({
-                        'keyword': row['Target'],
-                        'campaign': row.get('Campaign', 'Unknown'),
-                        'roas': row['ROAS'],
-                        'sales': row['Sales'],
-                        'spend': row['Spend'],
-                        'action': 'Pause' if row['ROAS'] < 1.0 else 'Reduce bid'
-                    })
-        
-        # Analyze trends from history
-        history = self.history_manager.get_keyword_history(days=30)
-        if history is not None and 'Target' in history.columns:
-            for keyword in df['Target'].unique()[:50]:  # Top 50 keywords
-                kw_history = history[history['Target'] == keyword].sort_values('snapshot_date')
-                if len(kw_history) >= 2:
-                    recent_roas = kw_history['ROAS'].iloc[-3:].mean() if len(kw_history) >= 3 else kw_history['ROAS'].iloc[-1]
-                    old_roas = kw_history['ROAS'].iloc[:3].mean() if len(kw_history) >= 6 else kw_history['ROAS'].iloc[0]
-                    
-                    change = ((recent_roas - old_roas) / max(old_roas, 0.1)) * 100
-                    
-                    if change > 20:  # 20% improvement
-                        results['trending_up'].append({
-                            'keyword': keyword,
-                            'change_pct': change,
-                            'old_roas': old_roas,
-                            'new_roas': recent_roas
-                        })
-                    elif change < -20:  # 20% decline
-                        results['trending_down'].append({
-                            'keyword': keyword,
-                            'change_pct': change,
-                            'old_roas': old_roas,
-                            'new_roas': recent_roas
-                        })
-        
-        return results
-    
-    def analyze_product_performance(self):
-        """Analyze product-level performance and recommendations"""
-        results = {
-            'scale_up': [],
-            'maintain': [],
-            'reduce': [],
-            'discontinue': []
-        }
-        
-        # Combine data from repeat purchase and campaign data
-        if self.weekly_repeat is None:
-            return results
-        
-        df = self.weekly_repeat.copy()
-        
-        # Group by product
-        if 'Product Title' in df.columns:
-            for product in df['Product Title'].unique():
-                product_data = df[df['Product Title'] == product]
-                
-                # Calculate metrics
-                total_sales = product_data['Repeat Ordered Product Sales: Sales'].sum() if 'Repeat Ordered Product Sales: Sales' in product_data.columns else 0
-                repeat_rate = product_data['Repeat Customer Share: % Share of Total Customers'].mean() if 'Repeat Customer Share: % Share of Total Customers' in product_data.columns else 0
-                
-                # Decision logic
-                if repeat_rate > 5 and total_sales > 10000:
-                    results['scale_up'].append({
-                        'product': product,
-                        'repeat_rate': repeat_rate,
-                        'sales': total_sales,
-                        'reason': 'High repeat purchase rate and strong sales',
-                        'action': 'Increase ad spend by 30-50%'
-                    })
-                elif repeat_rate > 2 and total_sales > 5000:
-                    results['maintain'].append({
-                        'product': product,
-                        'repeat_rate': repeat_rate,
-                        'sales': total_sales,
-                        'reason': 'Stable performance',
-                        'action': 'Maintain current spend'
-                    })
-                elif repeat_rate < 1 and total_sales < 3000:
-                    results['discontinue'].append({
-                        'product': product,
-                        'repeat_rate': repeat_rate,
-                        'sales': total_sales,
-                        'reason': 'Low repeat rate and weak sales',
-                        'action': 'Consider discontinuing or major changes'
-                    })
-                else:
-                    results['reduce'].append({
-                        'product': product,
-                        'repeat_rate': repeat_rate,
-                        'sales': total_sales,
-                        'reason': 'Below target performance',
-                        'action': 'Reduce ad spend by 20-30%'
-                    })
-        
-        return results
-    
-    def generate_campaign_trends(self):
-        """Generate trend data for campaigns"""
-        history = self.history_manager.get_campaign_history(days=30)
-        
-        if history is None or 'Campaign name' not in history.columns:
-            return None
-        
-        trends = []
-        
-        for campaign in history['Campaign name'].unique()[:20]:  # Top 20 campaigns
-            camp_history = history[history['Campaign name'] == campaign].sort_values('snapshot_date')
-            
-            if len(camp_history) >= 2:
-                trend_data = {
-                    'campaign': campaign,
-                    'dates': camp_history['snapshot_date'].tolist(),
-                    'roas': camp_history['ROAS'].tolist() if 'ROAS' in camp_history.columns else [],
-                    'sales': camp_history['Sales (converted)'].tolist() if 'Sales (converted)' in camp_history.columns else camp_history['Sales'].tolist() if 'Sales' in camp_history.columns else [],
-                    'spend': camp_history['Total cost (converted)'].tolist() if 'Total cost (converted)' in camp_history.columns else camp_history['Total cost'].tolist() if 'Total cost' in camp_history.columns else []
-                }
-                
-                # Calculate trend direction
-                if len(trend_data['roas']) >= 2:
-                    recent_avg = np.mean(trend_data['roas'][-3:]) if len(trend_data['roas']) >= 3 else trend_data['roas'][-1]
-                    old_avg = np.mean(trend_data['roas'][:3]) if len(trend_data['roas']) >= 6 else trend_data['roas'][0]
-                    trend_data['direction'] = 'up' if recent_avg > old_avg else 'down'
-                    trend_data['change_pct'] = ((recent_avg - old_avg) / max(old_avg, 0.1)) * 100
-                
-                trends.append(trend_data)
-        
-        return trends
-    
-    def generate_recommendations(self):
-        """Generate actionable recommendations"""
-        recommendations = {
-            'expand': [],
-            'optimize': [],
-            'pause': [],
-            'close': []
-        }
-        
-        if self.daily_campaigns is None or len(self.daily_campaigns) == 0:
-            return recommendations
-        
-        df = self.calculate_roi_metrics(self.daily_campaigns)
-        
-        # Get historical data for trend analysis
-        history = self.history_manager.get_campaign_history(days=14)
-        
-        ROAS_EXCELLENT = 3.0
-        ROAS_GOOD = 2.0
-        ROAS_POOR = 1.0
-        MIN_SPEND = 100
-        
-        for idx, row in df.iterrows():
-            campaign = row.get('Campaign name', 'Unknown')
-            roas = row.get('ROAS', 0)
-            spend = row.get('Total cost (converted)', row.get('Total cost', 0))
-            sales = row.get('Sales (converted)', row.get('Sales', 0))
-            purchases = row.get('Purchases', 0)
-            
-            if spend < MIN_SPEND:
-                continue
-            
-            # Calculate trend if history available
-            trend = ''
-            if history is not None and campaign in history['Campaign name'].values:
-                camp_hist = history[history['Campaign name'] == campaign].sort_values('snapshot_date')
-                if len(camp_hist) >= 2:
-                    old_roas = camp_hist['ROAS'].iloc[0] if 'ROAS' in camp_hist.columns else 0
-                    new_roas = camp_hist['ROAS'].iloc[-1] if 'ROAS' in camp_hist.columns else 0
-                    if new_roas > old_roas * 1.1:
-                        trend = '📈 Trending up'
-                    elif new_roas < old_roas * 0.9:
-                        trend = '📉 Trending down'
-            
-            # EXPAND
-            if roas >= ROAS_EXCELLENT and purchases >= 5:
-                recommendations['expand'].append({
-                    'campaign': campaign,
-                    'roas': roas,
-                    'sales': sales,
-                    'spend': spend,
-                    'trend': trend,
-                    'reason': f'Excellent ROAS ({roas:.2f}x) with consistent conversions',
-                    'action': f'Increase budget by 30-50%'
-                })
-            
-            # OPTIMIZE
-            elif roas >= ROAS_GOOD and roas < ROAS_EXCELLENT:
-                recommendations['optimize'].append({
-                    'campaign': campaign,
-                    'roas': roas,
-                    'sales': sales,
-                    'spend': spend,
-                    'trend': trend,
-                    'reason': f'Good ROAS ({roas:.2f}x) but can be improved',
-                    'action': 'Review keywords, adjust bids, test new creatives'
-                })
-            
-            # PAUSE
-            elif roas >= ROAS_POOR and roas < ROAS_GOOD:
-                recommendations['pause'].append({
-                    'campaign': campaign,
-                    'roas': roas,
-                    'sales': sales,
-                    'spend': spend,
-                    'trend': trend,
-                    'reason': f'Below target ROAS ({roas:.2f}x)',
-                    'action': 'Pause and analyze. Review targeting, keywords, and audience'
-                })
-            
-            # CLOSE
-            elif roas < ROAS_POOR and spend > 500:
-                recommendations['close'].append({
-                    'campaign': campaign,
-                    'roas': roas,
-                    'sales': sales,
-                    'spend': spend,
-                    'trend': trend,
-                    'reason': f'Very low ROAS ({roas:.2f}x) with significant spend',
-                    'action': 'Close campaign or completely restructure'
-                })
-        
-        # Sort by impact
-        for key in recommendations:
-            recommendations[key] = sorted(
-                recommendations[key],
-                key=lambda x: x['spend'] * (x['roas'] if key == 'expand' else 1/max(x['roas'], 0.1)),
-                reverse=True
-            )
-        
-        return recommendations
-    
     def get_summary_stats(self):
         """Get summary statistics"""
         stats = {}
@@ -684,23 +365,176 @@ class AmazonROIAnalyzer:
             
             stats['total_campaigns'] = len(df)
             stats['active_campaigns'] = len(df[df['State'] == 'ENABLED']) if 'State' in df.columns else len(df)
-            stats['total_spend'] = df['Total cost (converted)'].sum() if 'Total cost (converted)' in df.columns else df['Total cost'].sum() if 'Total cost' in df.columns else 0
-            stats['total_sales'] = df['Sales (converted)'].sum() if 'Sales (converted)' in df.columns else df['Sales'].sum() if 'Sales' in df.columns else 0
+            
+            # Handle both column naming conventions
+            spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
+            sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
+            
+            stats['total_spend'] = df[spend_col].sum() if spend_col in df.columns else 0
+            stats['total_sales'] = df[sales_col].sum() if sales_col in df.columns else 0
             stats['avg_roas'] = df['ROAS'].mean() if 'ROAS' in df.columns else 0
             stats['total_purchases'] = df['Purchases'].sum() if 'Purchases' in df.columns else 0
             stats['total_clicks'] = df['Clicks'].sum() if 'Clicks' in df.columns else 0
             stats['avg_ctr'] = df['CTR'].mean() if 'CTR' in df.columns else 0
         
         return stats
+    
+    def generate_campaign_recommendations(self):
+        """Generate campaign recommendations in tabular format"""
+        if self.daily_campaigns is None or len(self.daily_campaigns) == 0:
+            return pd.DataFrame()
+        
+        df = self.daily_campaigns.copy()
+        
+        # Get column names
+        spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
+        sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
+        
+        # Filter campaigns with minimum spend
+        df = df[df[spend_col] > 100]
+        
+        # Calculate metrics
+        if 'ROAS' in df.columns:
+            # Determine action
+            def get_action(row):
+                roas = row['ROAS']
+                purchases = row.get('Purchases', 0)
+                
+                if roas >= 3.0 and purchases >= 5:
+                    return 'EXPAND', 'Increase budget by 30-50%', 1
+                elif roas >= 2.0:
+                    return 'OPTIMIZE', 'Review keywords and adjust bids', 2
+                elif roas >= 1.0:
+                    return 'PAUSE', 'Pause and analyze', 3
+                else:
+                    return 'CLOSE', 'Close immediately', 4
+            
+            df[['Action', 'Recommendation', 'Priority']] = df.apply(
+                lambda row: pd.Series(get_action(row)), axis=1
+            )
+            
+            # Select relevant columns
+            result_cols = ['Campaign name', 'Action', 'ROAS', sales_col, spend_col, 
+                          'Purchases', 'Clicks', 'Recommendation']
+            
+            # Filter to only existing columns
+            result_cols = [col for col in result_cols if col in df.columns]
+            
+            result = df[result_cols].copy()
+            
+            # Rename for display
+            result.columns = [col.replace(' (converted)', '').replace('_', ' ').title() 
+                            for col in result.columns]
+            
+            # Sort by action priority and ROAS
+            if 'Priority' in df.columns:
+                result = result.sort_values(['Priority', 'Roas'], ascending=[True, False])
+            
+            return result
+        
+        return pd.DataFrame()
+    
+    def generate_keyword_recommendations(self):
+        """Generate keyword recommendations in tabular format"""
+        if self.daily_targets is None or len(self.daily_targets) == 0:
+            return pd.DataFrame()
+        
+        df = self.daily_targets.copy()
+        
+        # Filter keywords with minimum spend
+        df = df[df['Spend'] > 50]
+        
+        # Determine action
+        def get_keyword_action(row):
+            roas = row.get('ROAS', 0)
+            spend = row.get('Spend', 0)
+            
+            if roas >= 3.0:
+                return 'INCREASE BID', 'High performer - bid higher', 1
+            elif roas >= 2.0:
+                return 'MAINTAIN', 'Stable - keep current bid', 2
+            elif roas >= 1.0:
+                return 'REDUCE BID', 'Underperforming - lower bid', 3
+            else:
+                return 'PAUSE', 'Money loser - pause keyword', 4
+        
+        df[['Action', 'Recommendation', 'Priority']] = df.apply(
+            lambda row: pd.Series(get_keyword_action(row)), axis=1
+        )
+        
+        # Select relevant columns
+        result_cols = ['Target', 'Campaign', 'Action', 'ROAS', 'Sales', 'Spend', 
+                      'Orders', 'Clicks', 'CTR', 'Recommendation']
+        result_cols = [col for col in result_cols if col in df.columns]
+        
+        result = df[result_cols].copy()
+        
+        # Rename for display
+        result.columns = [col.replace('_', ' ').title() for col in result.columns]
+        
+        # Sort by priority and ROAS
+        result = result.sort_values(['Priority', 'Roas'], ascending=[True, False])
+        
+        return result
+    
+    def generate_product_recommendations(self):
+        """Generate product recommendations in tabular format"""
+        results = []
+        
+        # From repeat purchase data
+        if self.weekly_repeat is not None and len(self.weekly_repeat) > 0:
+            df = self.weekly_repeat.copy()
+            
+            if 'Product Title' in df.columns:
+                for product in df['Product Title'].unique():
+                    product_data = df[df['Product Title'] == product]
+                    
+                    sales = product_data['Repeat Ordered Product Sales: Sales'].sum() if 'Repeat Ordered Product Sales: Sales' in product_data.columns else 0
+                    repeat_rate = product_data['Repeat Customer Share: % Share of Total Customers'].mean() if 'Repeat Customer Share: % Share of Total Customers' in product_data.columns else 0
+                    asin = product_data['ASIN'].iloc[0] if 'ASIN' in product_data.columns else self.product_mapper.get_asin(product)
+                    
+                    # Determine action
+                    if repeat_rate > 5 and sales > 10000:
+                        action = 'SCALE UP'
+                        recommendation = 'Increase ad spend 30-50%'
+                        priority = 1
+                    elif repeat_rate > 2 and sales > 5000:
+                        action = 'MAINTAIN'
+                        recommendation = 'Keep current spend level'
+                        priority = 2
+                    elif repeat_rate < 1 and sales < 3000:
+                        action = 'DISCONTINUE'
+                        recommendation = 'Stop or major restructure'
+                        priority = 4
+                    else:
+                        action = 'REDUCE'
+                        recommendation = 'Cut spend by 20-30%'
+                        priority = 3
+                    
+                    results.append({
+                        'Product': product,
+                        'ASIN': asin,
+                        'Action': action,
+                        'Repeat Rate %': round(repeat_rate, 2),
+                        'Sales': round(sales, 0),
+                        'Recommendation': recommendation,
+                        'Priority': priority
+                    })
+        
+        if results:
+            result_df = pd.DataFrame(results)
+            result_df = result_df.sort_values(['Priority', 'Sales'], ascending=[True, False])
+            return result_df
+        
+        return pd.DataFrame()
 
 
 def main():
     """Main Streamlit application"""
     
     st.markdown('<p class="main-header">🎯 Amazon Marketing ROI Analyzer</p>', unsafe_allow_html=True)
-    st.markdown("**Analyze performance, track trends, optimize ROI with data-driven recommendations**")
     
-    # Initialize session state
+    # Initialize
     if 'analyzer' not in st.session_state:
         st.session_state.analyzer = AmazonROIAnalyzer()
     
@@ -710,19 +544,19 @@ def main():
     with st.sidebar:
         st.header("📁 Data Upload")
         
-        st.subheader("Weekly Reports (Every Friday)")
-        weekly_sales = st.file_uploader("Weekly Sales Report (Excel)", type=['xlsx'], key='weekly_sales')
-        weekly_campaigns = st.file_uploader("Weekly Campaigns Report (Excel)", type=['xlsx'], key='weekly_campaigns')
-        weekly_cpr = st.file_uploader("Weekly CPR Report (Excel)", type=['xlsx'], key='weekly_cpr')
-        weekly_repeat = st.file_uploader("Weekly Repeat Purchase (Excel)", type=['xlsx'], key='weekly_repeat')
+        st.subheader("Weekly Reports")
+        weekly_sales = st.file_uploader("Weekly Sales (Excel)", type=['xlsx'], key='ws')
+        weekly_campaigns = st.file_uploader("Weekly Campaigns (Excel)", type=['xlsx'], key='wc')
+        weekly_cpr = st.file_uploader("Weekly CPR (Excel)", type=['xlsx'], key='wcpr')
+        weekly_repeat = st.file_uploader("Weekly Repeat Purchase (Excel)", type=['xlsx'], key='wr')
         
         st.subheader("Daily Reports")
-        daily_campaigns = st.file_uploader("Daily Campaign Report (CSV)", type=['csv'], key='daily_campaigns')
-        daily_targets = st.file_uploader("Daily Targets Report (CSV)", type=['csv'], key='daily_targets')
-        daily_inventory = st.file_uploader("Daily Inventory Report (CSV)", type=['csv'], key='daily_inventory')
+        daily_campaigns = st.file_uploader("Daily Campaigns (CSV)", type=['csv'], key='dc')
+        daily_targets = st.file_uploader("Daily Targets (CSV)", type=['csv'], key='dt')
+        daily_inventory = st.file_uploader("Daily Inventory (CSV)", type=['csv'], key='di')
         
         if st.button("🔄 Load All Data", type="primary"):
-            with st.spinner("Loading data..."):
+            with st.spinner("Loading..."):
                 if weekly_sales:
                     analyzer.load_weekly_sales(weekly_sales)
                 if weekly_campaigns:
@@ -738,474 +572,455 @@ def main():
                 if daily_inventory:
                     analyzer.load_daily_inventory(daily_inventory)
                 
-                st.success("✅ All data loaded successfully!")
-                st.info("📊 Historical data saved for trend analysis")
+                st.success("✅ Data loaded!")
+        
+        st.markdown("---")
+        
+        # Date filter
+        st.subheader("⏰ Time Filter")
+        date_range = st.selectbox(
+            "Focus on campaigns from:",
+            ["All Time", "Last 7 Days", "Last 14 Days", "Last 30 Days", "Custom Range"]
+        )
+        
+        if date_range == "Custom Range":
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input("Start Date")
+            with col2:
+                end_date = st.date_input("End Date")
     
-    # Main tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    # Main tabs - SIMPLIFIED AND ACTIONABLE
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Dashboard",
-        "🎯 Campaign Recommendations",
-        "🔑 Keyword Performance",
-        "📦 Product Analysis",
-        "📈 Trends & History",
-        "🔍 Detailed Data",
-        "💡 Insights"
+        "🎯 Campaign Actions",
+        "🔑 Keyword Actions", 
+        "📦 Product Actions",
+        "⚙️ Settings"
     ])
     
     # Tab 1: Dashboard
     with tab1:
-        st.header("Performance Dashboard")
+        st.header("Performance Summary")
         
         stats = analyzer.get_summary_stats()
         
         if stats:
-            col1, col2, col3, col4 = st.columns(4)
+            # Top metrics
+            col1, col2, col3, col4, col5 = st.columns(5)
             
             with col1:
-                st.metric("Total Campaigns", f"{stats.get('total_campaigns', 0)}", 
-                         f"{stats.get('active_campaigns', 0)} active")
+                st.metric("Total Campaigns", f"{stats.get('total_campaigns', 0)}")
             with col2:
                 st.metric("Total Spend", f"₹{stats.get('total_spend', 0):,.0f}")
             with col3:
-                roi_pct = ((stats.get('total_sales', 0) / max(stats.get('total_spend', 1), 1) - 1) * 100)
-                st.metric("Total Sales", f"₹{stats.get('total_sales', 0):,.0f}", 
-                         f"{roi_pct:.1f}% ROI")
+                st.metric("Total Sales", f"₹{stats.get('total_sales', 0):,.0f}")
             with col4:
+                roi = ((stats.get('total_sales', 0) / max(stats.get('total_spend', 1), 1) - 1) * 100)
+                st.metric("ROI", f"{roi:.1f}%")
+            with col5:
                 st.metric("Avg ROAS", f"{stats.get('avg_roas', 0):.2f}x")
             
             st.markdown("---")
             
-            col5, col6, col7 = st.columns(3)
-            with col5:
-                st.metric("Total Purchases", f"{stats.get('total_purchases', 0):,.0f}")
-            with col6:
-                st.metric("Total Clicks", f"{stats.get('total_clicks', 0):,.0f}")
-            with col7:
-                st.metric("Avg CTR", f"{stats.get('avg_ctr', 0):.2f}%")
-            
-            # Visualizations
-            if analyzer.daily_campaigns is not None and len(analyzer.daily_campaigns) > 0:
-                st.markdown("---")
-                st.subheader("Campaign Performance Overview")
+            # Quick action summary
+            recs = analyzer.generate_campaign_recommendations()
+            if not recs.empty and 'Action' in recs.columns:
+                st.subheader("📋 Action Summary")
                 
-                df_viz = analyzer.calculate_roi_metrics(analyzer.daily_campaigns)
+                action_summary = recs['Action'].value_counts()
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.markdown("**Top 10 Campaigns by ROAS**")
-                    
-                    if 'ROAS' in df_viz.columns and 'Campaign name' in df_viz.columns:
-                        sales_col = 'Sales (converted)' if 'Sales (converted)' in df_viz.columns else 'Sales'
-                        
-                        cols_to_show = ['Campaign name', 'ROAS']
-                        if sales_col in df_viz.columns:
-                            cols_to_show.append(sales_col)
-                        
-                        top_roas = df_viz.nlargest(10, 'ROAS')[cols_to_show]
-                        
-                        fig = px.bar(top_roas, x='ROAS', y='Campaign name', orientation='h',
-                                    color='ROAS', color_continuous_scale='RdYlGn',
-                                    title='Top Performers')
-                        fig.update_layout(height=400)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("Insufficient data for ROAS chart")
+                    expand_count = action_summary.get('EXPAND', 0)
+                    st.metric("🚀 Campaigns to EXPAND", expand_count)
+                    if expand_count > 0:
+                        st.caption("Scale up budget")
                 
                 with col2:
-                    st.markdown("**Spend vs Sales**")
-                    spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df_viz.columns else 'Total cost'
-                    sales_col = 'Sales (converted)' if 'Sales (converted)' in df_viz.columns else 'Sales'
-                    
-                    if all(col in df_viz.columns for col in [spend_col, sales_col, 'ROAS', 'Campaign name']):
-                        fig = px.scatter(df_viz, x=spend_col, y=sales_col, size='ROAS', color='ROAS',
-                                        hover_data=['Campaign name'], color_continuous_scale='RdYlGn',
-                                        title='ROI Efficiency')
-                        fig.update_layout(height=400)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("Insufficient data for Spend vs Sales chart")
+                    optimize_count = action_summary.get('OPTIMIZE', 0)
+                    st.metric("⚙️ Campaigns to OPTIMIZE", optimize_count)
+                    if optimize_count > 0:
+                        st.caption("Review & improve")
+                
+                with col3:
+                    pause_count = action_summary.get('PAUSE', 0)
+                    st.metric("⏸️ Campaigns to PAUSE", pause_count)
+                    if pause_count > 0:
+                        st.caption("Stop & analyze")
+                
+                with col4:
+                    close_count = action_summary.get('CLOSE', 0)
+                    st.metric("❌ Campaigns to CLOSE", close_count)
+                    if close_count > 0:
+                        st.caption("Shut down now")
         else:
-            st.info("👈 Please upload data files from the sidebar")
+            st.info("👈 Upload data files to see dashboard")
     
-    # Tab 2: Campaign Recommendations
+    # Tab 2: Campaign Actions
     with tab2:
         st.header("🎯 Campaign Recommendations")
         
-        if analyzer.daily_campaigns is not None:
-            recommendations = analyzer.generate_recommendations()
+        recs = analyzer.generate_campaign_recommendations()
+        
+        if not recs.empty:
+            # Summary at top
+            st.subheader("📊 Summary")
+            action_counts = recs['Action'].value_counts()
             
-            # EXPAND
-            if recommendations['expand']:
-                st.markdown("### 🚀 EXPAND - Scale These Winners")
-                st.markdown("High performers with excellent ROAS. Increase budget to maximize returns.")
-                
-                for rec in recommendations['expand'][:10]:
-                    trend_indicator = f"<br><span class='trending-{rec['trend'].split()[1] if rec['trend'] else 'neutral'}'>{rec['trend']}</span>" if rec['trend'] else ""
+            summary_cols = st.columns(4)
+            
+            actions_config = [
+                ('EXPAND', '🚀', '#d4edda'),
+                ('OPTIMIZE', '⚙️', '#cfe2ff'),
+                ('PAUSE', '⏸️', '#fff3cd'),
+                ('CLOSE', '❌', '#f8d7da')
+            ]
+            
+            for idx, (action, emoji, color) in enumerate(actions_config):
+                with summary_cols[idx]:
+                    count = action_counts.get(action, 0)
                     st.markdown(f"""
-                    <div class="recommendation-box expand">
-                        <strong>{rec['campaign']}</strong>{trend_indicator}<br>
-                        📈 ROAS: {rec['roas']:.2f}x | 💰 Sales: ₹{rec['sales']:,.0f} | 💵 Spend: ₹{rec['spend']:,.0f}<br>
-                        <em>{rec['reason']}</em><br>
-                        <strong>Action:</strong> {rec['action']}
+                    <div style="background-color: {color}; padding: 1rem; border-radius: 0.5rem; text-align: center;">
+                        <h3>{emoji} {action}</h3>
+                        <h1>{count}</h1>
                     </div>
                     """, unsafe_allow_html=True)
             
-            # OPTIMIZE
-            if recommendations['optimize']:
-                st.markdown("### ⚙️ OPTIMIZE - Improve Performance")
-                st.markdown("Good campaigns with potential for optimization.")
-                
-                for rec in recommendations['optimize'][:10]:
-                    trend_indicator = f"<br><span class='trending-{rec['trend'].split()[1] if rec['trend'] else 'neutral'}'>{rec['trend']}</span>" if rec['trend'] else ""
-                    st.markdown(f"""
-                    <div class="recommendation-box optimize">
-                        <strong>{rec['campaign']}</strong>{trend_indicator}<br>
-                        📈 ROAS: {rec['roas']:.2f}x | 💰 Sales: ₹{rec['sales']:,.0f} | 💵 Spend: ₹{rec['spend']:,.0f}<br>
-                        <em>{rec['reason']}</em><br>
-                        <strong>Action:</strong> {rec['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # PAUSE
-            if recommendations['pause']:
-                st.markdown("### ⏸️ PAUSE - Needs Review")
-                st.markdown("Underperforming campaigns that should be paused for analysis.")
-                
-                for rec in recommendations['pause'][:10]:
-                    trend_indicator = f"<br><span class='trending-{rec['trend'].split()[1] if rec['trend'] else 'neutral'}'>{rec['trend']}</span>" if rec['trend'] else ""
-                    st.markdown(f"""
-                    <div class="recommendation-box pause">
-                        <strong>{rec['campaign']}</strong>{trend_indicator}<br>
-                        📉 ROAS: {rec['roas']:.2f}x | 💰 Sales: ₹{rec['sales']:,.0f} | 💵 Spend: ₹{rec['spend']:,.0f}<br>
-                        <em>{rec['reason']}</em><br>
-                        <strong>Action:</strong> {rec['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # CLOSE
-            if recommendations['close']:
-                st.markdown("### ❌ CLOSE - Stop the Bleed")
-                st.markdown("Money-losing campaigns that should be closed immediately.")
-                
-                for rec in recommendations['close'][:10]:
-                    trend_indicator = f"<br><span class='trending-{rec['trend'].split()[1] if rec['trend'] else 'neutral'}'>{rec['trend']}</span>" if rec['trend'] else ""
-                    st.markdown(f"""
-                    <div class="recommendation-box close">
-                        <strong>{rec['campaign']}</strong>{trend_indicator}<br>
-                        ❌ ROAS: {rec['roas']:.2f}x | 💰 Sales: ₹{rec['sales']:,.0f} | 💵 Spend: ₹{rec['spend']:,.0f}<br>
-                        <em>{rec['reason']}</em><br>
-                        <strong>Action:</strong> {rec['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # Summary
             st.markdown("---")
-            st.subheader("Summary")
-            col1, col2, col3, col4 = st.columns(4)
+            
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            
             with col1:
-                st.metric("Expand", len(recommendations['expand']))
+                action_filter = st.multiselect(
+                    "Filter by Action",
+                    options=['EXPAND', 'OPTIMIZE', 'PAUSE', 'CLOSE'],
+                    default=['EXPAND', 'OPTIMIZE', 'PAUSE', 'CLOSE']
+                )
+            
             with col2:
-                st.metric("Optimize", len(recommendations['optimize']))
+                min_roas = st.number_input("Min ROAS", min_value=0.0, value=0.0, step=0.1)
+            
             with col3:
-                st.metric("Pause", len(recommendations['pause']))
-            with col4:
-                st.metric("Close", len(recommendations['close']))
+                min_spend = st.number_input("Min Spend (₹)", min_value=0, value=0, step=100)
+            
+            # Filter data
+            filtered_recs = recs.copy()
+            if action_filter:
+                filtered_recs = filtered_recs[filtered_recs['Action'].isin(action_filter)]
+            if 'Roas' in filtered_recs.columns:
+                filtered_recs = filtered_recs[filtered_recs['Roas'] >= min_roas]
+            if 'Total Cost' in filtered_recs.columns:
+                filtered_recs = filtered_recs[filtered_recs['Total Cost'] >= min_spend]
+            elif 'Spend' in filtered_recs.columns:
+                filtered_recs = filtered_recs[filtered_recs['Spend'] >= min_spend]
+            
+            st.subheader(f"📋 All Recommendations ({len(filtered_recs)} campaigns)")
+            
+            # Display table with formatting
+            st.dataframe(
+                filtered_recs.drop('Priority', axis=1, errors='ignore'),
+                use_container_width=True,
+                height=600
+            )
+            
+            # Export option
+            csv = filtered_recs.to_csv(index=False)
+            st.download_button(
+                "📥 Download Recommendations (CSV)",
+                csv,
+                "campaign_recommendations.csv",
+                "text/csv"
+            )
         else:
-            st.info("👈 Please upload campaign data")
+            st.info("No campaign data available. Upload Daily Campaigns report.")
     
-    # Tab 3: Keyword Performance
+    # Tab 3: Keyword Actions
     with tab3:
-        st.header("🔑 Keyword Performance Analysis")
+        st.header("🔑 Keyword Recommendations")
         
-        keyword_analysis = analyzer.analyze_keyword_performance()
+        keyword_recs = analyzer.generate_keyword_recommendations()
         
-        col1, col2 = st.columns(2)
+        if not keyword_recs.empty:
+            # Summary
+            st.subheader("📊 Summary")
+            action_counts = keyword_recs['Action'].value_counts()
+            
+            summary_cols = st.columns(4)
+            
+            keyword_actions = [
+                ('INCREASE BID', '🔼', '#d4edda'),
+                ('MAINTAIN', '➡️', '#cfe2ff'),
+                ('REDUCE BID', '🔽', '#fff3cd'),
+                ('PAUSE', '⏸️', '#f8d7da')
+            ]
+            
+            for idx, (action, emoji, color) in enumerate(keyword_actions):
+                with summary_cols[idx]:
+                    count = action_counts.get(action, 0)
+                    st.markdown(f"""
+                    <div style="background-color: {color}; padding: 1rem; border-radius: 0.5rem; text-align: center;">
+                        <h4>{emoji} {action}</h4>
+                        <h2>{count}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                keyword_action_filter = st.multiselect(
+                    "Filter by Action",
+                    options=['INCREASE BID', 'MAINTAIN', 'REDUCE BID', 'PAUSE'],
+                    default=['INCREASE BID', 'MAINTAIN', 'REDUCE BID', 'PAUSE']
+                )
+            
+            with col2:
+                keyword_min_roas = st.number_input("Min ROAS", min_value=0.0, value=0.0, step=0.1, key='kw_roas')
+            
+            with col3:
+                keyword_min_spend = st.number_input("Min Spend (₹)", min_value=0, value=0, step=50, key='kw_spend')
+            
+            # Filter
+            filtered_keywords = keyword_recs.copy()
+            if keyword_action_filter:
+                filtered_keywords = filtered_keywords[filtered_keywords['Action'].isin(keyword_action_filter)]
+            if 'Roas' in filtered_keywords.columns:
+                filtered_keywords = filtered_keywords[filtered_keywords['Roas'] >= keyword_min_roas]
+            if 'Spend' in filtered_keywords.columns:
+                filtered_keywords = filtered_keywords[filtered_keywords['Spend'] >= keyword_min_spend]
+            
+            st.subheader(f"📋 All Keywords ({len(filtered_keywords)} keywords)")
+            
+            # Display table
+            st.dataframe(
+                filtered_keywords.drop('Priority', axis=1, errors='ignore'),
+                use_container_width=True,
+                height=600
+            )
+            
+            # Export
+            csv = filtered_keywords.to_csv(index=False)
+            st.download_button(
+                "📥 Download Keyword Recommendations (CSV)",
+                csv,
+                "keyword_recommendations.csv",
+                "text/csv"
+            )
+        else:
+            st.info("No keyword data available. Upload Daily Targets report.")
+    
+    # Tab 4: Product Actions
+    with tab4:
+        st.header("📦 Product Recommendations")
+        
+        product_recs = analyzer.generate_product_recommendations()
+        
+        if not product_recs.empty:
+            # Summary
+            st.subheader("📊 Summary")
+            action_counts = product_recs['Action'].value_counts()
+            
+            summary_cols = st.columns(4)
+            
+            product_actions = [
+                ('SCALE UP', '🚀', '#d4edda'),
+                ('MAINTAIN', '✅', '#cfe2ff'),
+                ('REDUCE', '⚠️', '#fff3cd'),
+                ('DISCONTINUE', '❌', '#f8d7da')
+            ]
+            
+            for idx, (action, emoji, color) in enumerate(product_actions):
+                with summary_cols[idx]:
+                    count = action_counts.get(action, 0)
+                    st.markdown(f"""
+                    <div style="background-color: {color}; padding: 1rem; border-radius: 0.5rem; text-align: center;">
+                        <h4>{emoji} {action}</h4>
+                        <h2>{count}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                product_action_filter = st.multiselect(
+                    "Filter by Action",
+                    options=['SCALE UP', 'MAINTAIN', 'REDUCE', 'DISCONTINUE'],
+                    default=['SCALE UP', 'MAINTAIN', 'REDUCE', 'DISCONTINUE']
+                )
+            
+            with col2:
+                sort_by = st.selectbox(
+                    "Sort By",
+                    options=['Sales', 'Repeat Rate %', 'Action'],
+                    index=0
+                )
+            
+            with col3:
+                sort_order = st.selectbox(
+                    "Order",
+                    options=['Descending', 'Ascending'],
+                    index=0
+                )
+            
+            # Filter and sort
+            filtered_products = product_recs.copy()
+            if product_action_filter:
+                filtered_products = filtered_products[filtered_products['Action'].isin(product_action_filter)]
+            
+            if sort_by:
+                ascending = sort_order == 'Ascending'
+                filtered_products = filtered_products.sort_values(sort_by, ascending=ascending)
+            
+            st.subheader(f"📋 All Products ({len(filtered_products)} products)")
+            
+            # Display table
+            st.dataframe(
+                filtered_products.drop('Priority', axis=1, errors='ignore'),
+                use_container_width=True,
+                height=600
+            )
+            
+            # Export
+            csv = filtered_products.to_csv(index=False)
+            st.download_button(
+                "📥 Download Product Recommendations (CSV)",
+                csv,
+                "product_recommendations.csv",
+                "text/csv"
+            )
+            
+            # Show detailed view with campaign data
+            st.markdown("---")
+            st.subheader("🔍 Product Campaign Details")
+            
+            if analyzer.daily_campaigns is not None and not filtered_products.empty:
+                selected_product = st.selectbox(
+                    "Select Product to View Campaign Details",
+                    options=filtered_products['Product'].tolist()
+                )
+                
+                if selected_product:
+                    # Find campaigns for this product (simplified - would need better mapping)
+                    st.info(f"Showing campaign data for: **{selected_product}**")
+                    st.caption("Note: Full product-campaign mapping requires ASIN linking. Configure in Settings tab.")
+        else:
+            st.info("No product data available. Upload Weekly Repeat Purchase report.")
+    
+    # Tab 5: Settings
+    with tab5:
+        st.header("⚙️ Settings & Configuration")
+        
+        st.subheader("🔗 Product-ASIN Mapping")
+        st.markdown("Map your product names to ASINs for better cross-report analysis.")
+        
+        # Show current mappings
+        current_mappings = analyzer.product_mapper.mapping
+        
+        if current_mappings:
+            st.markdown("**Current Mappings:**")
+            mapping_df = pd.DataFrame([
+                {'Product Name': k, 'ASIN': v}
+                for k, v in current_mappings.items()
+            ])
+            st.dataframe(mapping_df, use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("**Add New Mapping:**")
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
         
         with col1:
-            st.subheader("✅ Top Performing Keywords")
-            if keyword_analysis['top_performers']:
-                for kw in keyword_analysis['top_performers'][:15]:
-                    st.markdown(f"""
-                    <div class="recommendation-box expand">
-                        <strong>{kw['keyword']}</strong><br>
-                        Campaign: {kw['campaign']}<br>
-                        ROAS: {kw['roas']:.2f}x | Sales: ₹{kw['sales']:,.0f} | Spend: ₹{kw['spend']:,.0f}<br>
-                        <strong>Action:</strong> {kw['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No keyword data available. Upload Daily Targets report.")
+            new_product = st.text_input("Product Name", key='new_product')
         
         with col2:
-            st.subheader("❌ Poor Performing Keywords")
-            if keyword_analysis['poor_performers']:
-                for kw in keyword_analysis['poor_performers'][:15]:
-                    st.markdown(f"""
-                    <div class="recommendation-box close">
-                        <strong>{kw['keyword']}</strong><br>
-                        Campaign: {kw['campaign']}<br>
-                        ROAS: {kw['roas']:.2f}x | Sales: ₹{kw['sales']:,.0f} | Spend: ₹{kw['spend']:,.0f}<br>
-                        <strong>Action:</strong> {kw['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No underperforming keywords detected.")
+            new_asin = st.text_input("ASIN", key='new_asin')
+        
+        with col3:
+            st.write("")  # Spacing
+            st.write("")
+            if st.button("➕ Add Mapping"):
+                if new_product and new_asin:
+                    analyzer.product_mapper.add_mapping(new_product, new_asin)
+                    st.success(f"✅ Mapped '{new_product}' to '{new_asin}'")
+                    st.rerun()
+                else:
+                    st.error("Please enter both product name and ASIN")
         
         st.markdown("---")
         
-        col3, col4 = st.columns(2)
+        # Import mappings from uploaded data
+        st.subheader("📥 Auto-Import Mappings")
         
-        with col3:
-            st.subheader("📈 Trending Up")
-            if keyword_analysis['trending_up']:
-                for kw in keyword_analysis['trending_up'][:10]:
-                    st.success(f"**{kw['keyword']}**: {kw['old_roas']:.2f}x → {kw['new_roas']:.2f}x ({kw['change_pct']:+.1f}%)")
-            else:
-                st.info("Need more historical data to detect trends")
+        if analyzer.weekly_repeat is not None:
+            if st.button("Import from Weekly Repeat Purchase Data"):
+                if 'ASIN' in analyzer.weekly_repeat.columns and 'Product Title' in analyzer.weekly_repeat.columns:
+                    count = 0
+                    for _, row in analyzer.weekly_repeat.iterrows():
+                        if pd.notna(row['Product Title']) and pd.notna(row['ASIN']):
+                            analyzer.product_mapper.add_mapping(row['Product Title'], row['ASIN'])
+                            count += 1
+                    st.success(f"✅ Imported {count} product-ASIN mappings!")
+                    st.rerun()
+                else:
+                    st.error("Required columns not found in data")
+        else:
+            st.info("Upload Weekly Repeat Purchase report first to auto-import mappings")
         
-        with col4:
-            st.subheader("📉 Trending Down")
-            if keyword_analysis['trending_down']:
-                for kw in keyword_analysis['trending_down'][:10]:
-                    st.warning(f"**{kw['keyword']}**: {kw['old_roas']:.2f}x → {kw['new_roas']:.2f}x ({kw['change_pct']:+.1f}%)")
-            else:
-                st.info("No declining trends detected")
-    
-    # Tab 4: Product Analysis
-    with tab4:
-        st.header("📦 Product Performance & Recommendations")
+        st.markdown("---")
         
-        product_analysis = analyzer.analyze_product_performance()
+        # Threshold settings
+        st.subheader("🎯 Recommendation Thresholds")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("🚀 Products to Scale Up")
-            if product_analysis['scale_up']:
-                for prod in product_analysis['scale_up']:
-                    st.markdown(f"""
-                    <div class="recommendation-box expand">
-                        <strong>{prod['product']}</strong><br>
-                        Repeat Rate: {prod['repeat_rate']:.1f}% | Sales: ₹{prod['sales']:,.0f}<br>
-                        <em>{prod['reason']}</em><br>
-                        <strong>Action:</strong> {prod['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No high-performing products detected. Upload Weekly Repeat Purchase report.")
-            
-            st.subheader("✅ Products to Maintain")
-            if product_analysis['maintain']:
-                for prod in product_analysis['maintain']:
-                    st.markdown(f"""
-                    <div class="recommendation-box optimize">
-                        <strong>{prod['product']}</strong><br>
-                        Repeat Rate: {prod['repeat_rate']:.1f}% | Sales: ₹{prod['sales']:,.0f}<br>
-                        <em>{prod['reason']}</em><br>
-                        <strong>Action:</strong> {prod['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
+            st.markdown("**Campaign Thresholds:**")
+            expand_roas = st.number_input("EXPAND ROAS threshold", value=3.0, step=0.1)
+            optimize_roas = st.number_input("OPTIMIZE ROAS threshold", value=2.0, step=0.1)
+            pause_roas = st.number_input("PAUSE ROAS threshold", value=1.0, step=0.1)
         
         with col2:
-            st.subheader("⚠️ Products to Reduce Spend")
-            if product_analysis['reduce']:
-                for prod in product_analysis['reduce']:
-                    st.markdown(f"""
-                    <div class="recommendation-box pause">
-                        <strong>{prod['product']}</strong><br>
-                        Repeat Rate: {prod['repeat_rate']:.1f}% | Sales: ₹{prod['sales']:,.0f}<br>
-                        <em>{prod['reason']}</em><br>
-                        <strong>Action:</strong> {prod['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            st.subheader("❌ Products to Discontinue")
-            if product_analysis['discontinue']:
-                for prod in product_analysis['discontinue']:
-                    st.markdown(f"""
-                    <div class="recommendation-box close">
-                        <strong>{prod['product']}</strong><br>
-                        Repeat Rate: {prod['repeat_rate']:.1f}% | Sales: ₹{prod['sales']:,.0f}<br>
-                        <em>{prod['reason']}</em><br>
-                        <strong>Action:</strong> {prod['action']}
-                    </div>
-                    """, unsafe_allow_html=True)
-    
-    # Tab 5: Trends & History
-    with tab5:
-        st.header("📈 Performance Trends & Historical Analysis")
+            st.markdown("**Minimum Spend Filters:**")
+            min_campaign_spend = st.number_input("Min campaign spend (₹)", value=100, step=50)
+            min_keyword_spend = st.number_input("Min keyword spend (₹)", value=50, step=25)
         
-        trends = analyzer.generate_campaign_trends()
+        st.markdown("---")
         
-        if trends:
-            st.subheader("Campaign Performance Over Time")
-            
-            # Select campaign to view
-            campaign_names = [t['campaign'] for t in trends]
-            selected_campaign = st.selectbox("Select Campaign to View Trend", campaign_names)
-            
-            if selected_campaign:
-                camp_data = next((t for t in trends if t['campaign'] == selected_campaign), None)
-                
-                if camp_data and len(camp_data['dates']) > 1:
-                    # Create trend chart
-                    fig = go.Figure()
-                    
-                    if camp_data['roas']:
-                        fig.add_trace(go.Scatter(
-                            x=camp_data['dates'],
-                            y=camp_data['roas'],
-                            name='ROAS',
-                            line=dict(color='#28a745', width=3)
-                        ))
-                    
-                    fig.update_layout(
-                        title=f"ROAS Trend: {selected_campaign}",
-                        xaxis_title="Date",
-                        yaxis_title="ROAS",
-                        height=400,
-                        hovermode='x unified'
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Show change metrics
-                    if 'change_pct' in camp_data:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Trend Direction", 
-                                     "↗️ Improving" if camp_data['direction'] == 'up' else "↘️ Declining")
-                        with col2:
-                            st.metric("Change", f"{camp_data['change_pct']:+.1f}%")
-            
-            st.markdown("---")
-            st.subheader("All Campaigns Trend Summary")
-            
-            trend_summary = []
-            for t in trends:
-                if 'change_pct' in t:
-                    trend_summary.append({
-                        'Campaign': t['campaign'],
-                        'Direction': '↗️ Up' if t['direction'] == 'up' else '↘️ Down',
-                        'Change %': f"{t['change_pct']:+.1f}%"
-                    })
-            
-            if trend_summary:
-                st.dataframe(pd.DataFrame(trend_summary), use_container_width=True)
-        else:
-            st.info("📊 Historical data will appear here after multiple data uploads over time.")
-            st.markdown("""
-            **To enable trend analysis:**
-            1. Upload your data regularly (weekly recommended)
-            2. Data is automatically saved to track performance over time
-            3. After 2+ uploads, trend lines and change metrics will appear
-            """)
-    
-    # Tab 6: Detailed Data
-    with tab4:
-        st.header("🔍 Detailed Data View")
+        # Data management
+        st.subheader("🗂️ Data Management")
         
-        data_view = st.selectbox(
-            "Select Data to View",
-            ["Daily Campaigns", "Daily Targets", "Daily Inventory", 
-             "Weekly Campaigns", "Weekly CPR", "Weekly Repeat Purchase"]
-        )
+        col1, col2 = st.columns(2)
         
-        if data_view == "Daily Campaigns" and analyzer.daily_campaigns is not None:
-            st.dataframe(analyzer.daily_campaigns, use_container_width=True)
-        elif data_view == "Daily Targets" and analyzer.daily_targets is not None:
-            st.dataframe(analyzer.daily_targets, use_container_width=True)
-        elif data_view == "Daily Inventory" and analyzer.daily_inventory is not None:
-            st.dataframe(analyzer.daily_inventory, use_container_width=True)
-        elif data_view == "Weekly Campaigns" and analyzer.weekly_campaigns is not None:
-            st.dataframe(analyzer.weekly_campaigns, use_container_width=True)
-        elif data_view == "Weekly CPR" and analyzer.weekly_cpr is not None:
-            st.dataframe(analyzer.weekly_cpr, use_container_width=True)
-        elif data_view == "Weekly Repeat Purchase" and analyzer.weekly_repeat is not None:
-            st.dataframe(analyzer.weekly_repeat, use_container_width=True)
-        else:
-            st.info(f"No data loaded for {data_view}")
-    
-    # Tab 7: Insights
-    with tab7:
-        st.header("💡 Key Insights & Action Summary")
+        with col1:
+            if st.button("📊 View Historical Data Stats"):
+                campaign_history = analyzer.history_manager.get_campaign_history()
+                keyword_history = analyzer.history_manager.get_keyword_history()
+                
+                if campaign_history is not None:
+                    st.metric("Campaign Snapshots", len(campaign_history['snapshot_date'].unique() if 'snapshot_date' in campaign_history.columns else []))
+                
+                if keyword_history is not None:
+                    st.metric("Keyword Snapshots", len(keyword_history['snapshot_date'].unique() if 'snapshot_date' in keyword_history.columns else []))
         
-        if analyzer.daily_campaigns is not None and len(analyzer.daily_campaigns) > 0:
-            df = analyzer.calculate_roi_metrics(analyzer.daily_campaigns)
-            
-            st.subheader("📊 Quick Insights")
-            
-            spend_col = 'Total cost (converted)' if 'Total cost (converted)' in df.columns else 'Total cost'
-            sales_col = 'Sales (converted)' if 'Sales (converted)' in df.columns else 'Sales'
-            
-            if 'ROAS' in df.columns and len(df) > 0:
-                best = df.nlargest(1, 'ROAS').iloc[0]
-                st.success(f"🏆 **Best ROAS:** {best['Campaign name']} with {best['ROAS']:.2f}x ROAS")
-                
-                if spend_col in df.columns:
-                    highest_spend = df.nlargest(1, spend_col).iloc[0]
-                    st.info(f"💰 **Highest Spend:** {highest_spend['Campaign name']} spent ₹{highest_spend[spend_col]:,.0f}")
-                
-                if sales_col in df.columns:
-                    most_sales = df.nlargest(1, sales_col).iloc[0]
-                    st.info(f"📈 **Highest Sales:** {most_sales['Campaign name']} generated ₹{most_sales[sales_col]:,.0f}")
-            
-            # Performance Matrix
-            st.markdown("---")
-            st.subheader("Performance Matrix")
-            
-            if all(col in df.columns for col in ['ROAS', spend_col]):
-                median_roas = df['ROAS'].median()
-                median_spend = df[spend_col].median()
-                
-                df['Quadrant'] = df.apply(
-                    lambda row: 'Star' if row['ROAS'] >= median_roas and row[spend_col] >= median_spend
-                    else 'Question Mark' if row['ROAS'] >= median_roas and row[spend_col] < median_spend
-                    else 'Cash Cow' if row['ROAS'] < median_roas and row[spend_col] >= median_spend
-                    else 'Dog',
-                    axis=1
-                )
-                
-                if sales_col in df.columns:
-                    fig = px.scatter(df, x=spend_col, y='ROAS', color='Quadrant',
-                                    size=sales_col, hover_data=['Campaign name'],
-                                    title='Campaign Performance Matrix',
-                                    color_discrete_map={
-                                        'Star': '#28a745',
-                                        'Question Mark': '#ffc107',
-                                        'Cash Cow': '#17a2b8',
-                                        'Dog': '#dc3545'
-                                    })
-                    
-                    fig.add_hline(y=median_roas, line_dash="dash", line_color="gray", 
-                                 annotation_text="Median ROAS")
-                    fig.add_vline(x=median_spend, line_dash="dash", line_color="gray", 
-                                 annotation_text="Median Spend")
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("⭐ Stars", len(df[df['Quadrant'] == 'Star']), 
-                                 help="High ROAS, High Spend - Scale these!")
-                    with col2:
-                        st.metric("❓ Question Marks", len(df[df['Quadrant'] == 'Question Mark']),
-                                 help="High ROAS, Low Spend - Invest more")
-                    with col3:
-                        st.metric("🐮 Cash Cows", len(df[df['Quadrant'] == 'Cash Cow']),
-                                 help="Low ROAS, High Spend - Optimize or reduce")
-                    with col4:
-                        st.metric("🐕 Dogs", len(df[df['Quadrant'] == 'Dog']),
-                                 help="Low ROAS, Low Spend - Consider closing")
-        else:
-            st.info("👈 Please upload campaign data to see insights")
+        with col2:
+            if st.button("🗑️ Clear Historical Data", type="secondary"):
+                if st.checkbox("Confirm deletion"):
+                    # Would implement clear logic here
+                    st.warning("This would clear all historical data")
     
     # Footer
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: gray;'>"
-        "Amazon Marketing ROI Analyzer | Enhanced with Historical Tracking & Trend Analysis"
+        "Amazon Marketing ROI Analyzer v2.0 | Actionable Insights Edition"
         "</div>",
         unsafe_allow_html=True
     )
